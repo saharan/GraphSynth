@@ -363,7 +363,8 @@ app_Main.prototype = $extend(pot_core_App.prototype,{
 				time = 0;
 			}
 			this.prevKeyIndex = keyIndex;
-			this.compiler.setFrequency(440 * Math.pow(2,this.octaveShift - 4 + (keyIndex - 9) / 12),time);
+			var freq = 440 * Math.pow(2,this.octaveShift - 4 + (keyIndex - 9) / 12);
+			this.compiler.setFrequency(freq,time);
 		}
 		this.renderer.renderTouch(x,y,press && this.ppress);
 		if(this.control.nextControl != null) {
@@ -1154,6 +1155,12 @@ app__$NodeList_Eith_$Impl_$.fromL = function(l) {
 app__$NodeList_Eith_$Impl_$.fromR = function(r) {
 	return haxe_ds_Either.Right(r);
 };
+var graph_NodeType = $hxEnums["graph.NodeType"] = { __ename__ : true, __constructs__ : ["Normal","Module","Small","Boundary"]
+	,Normal: ($_=function(input,output) { return {_hx_index:0,input:input,output:output,__enum__:"graph.NodeType",toString:$estr}; },$_.__params__ = ["input","output"],$_)
+	,Module: ($_=function(input,output) { return {_hx_index:1,input:input,output:output,__enum__:"graph.NodeType",toString:$estr}; },$_.__params__ = ["input","output"],$_)
+	,Small: {_hx_index:2,__enum__:"graph.NodeType",toString:$estr}
+	,Boundary: ($_=function(io) { return {_hx_index:3,io:io,__enum__:"graph.NodeType",toString:$estr}; },$_.__params__ = ["io"],$_)
+};
 var synth_NodeRole = $hxEnums["synth.NodeRole"] = { __ename__ : true, __constructs__ : ["Frequency","Oscillator","Destination","Delay","Filter","Compressor","Envelope","Number","BinOp","Dupl","None"]
 	,Frequency: {_hx_index:0,__enum__:"synth.NodeRole",toString:$estr}
 	,Oscillator: ($_=function(type) { return {_hx_index:1,type:type,__enum__:"synth.NodeRole",toString:$estr}; },$_.__params__ = ["type"],$_)
@@ -1166,12 +1173,6 @@ var synth_NodeRole = $hxEnums["synth.NodeRole"] = { __ename__ : true, __construc
 	,BinOp: ($_=function(type) { return {_hx_index:8,type:type,__enum__:"synth.NodeRole",toString:$estr}; },$_.__params__ = ["type"],$_)
 	,Dupl: {_hx_index:9,__enum__:"synth.NodeRole",toString:$estr}
 	,None: {_hx_index:10,__enum__:"synth.NodeRole",toString:$estr}
-};
-var graph_NodeType = $hxEnums["graph.NodeType"] = { __ename__ : true, __constructs__ : ["Normal","Module","Small","Boundary"]
-	,Normal: ($_=function(input,output) { return {_hx_index:0,input:input,output:output,__enum__:"graph.NodeType",toString:$estr}; },$_.__params__ = ["input","output"],$_)
-	,Module: ($_=function(input,output) { return {_hx_index:1,input:input,output:output,__enum__:"graph.NodeType",toString:$estr}; },$_.__params__ = ["input","output"],$_)
-	,Small: {_hx_index:2,__enum__:"graph.NodeType",toString:$estr}
-	,Boundary: ($_=function(io) { return {_hx_index:3,io:io,__enum__:"graph.NodeType",toString:$estr}; },$_.__params__ = ["io"],$_)
 };
 var synth_EnvelopeData = function(a,d,s,r) {
 	this.a = a;
@@ -1546,6 +1547,7 @@ var app_WebAudioCompiler = function() {
 	this.waveDataBuffer = new Float32Array(1024);
 	this.socketMap = new haxe_ds_IntMap();
 	this.nodeMap = new haxe_ds_IntMap();
+	var _gthis = this;
 	this.ctx = new (window.AudioContext || window.webkitAudioContext)();
 	this.ctx.suspend();
 	var compressor = this.ctx.createDynamicsCompressor();
@@ -1573,8 +1575,17 @@ var app_WebAudioCompiler = function() {
 	app_AudioNodeTools.connectSafe(this.masterGain,hiddenGain);
 	app_AudioNodeTools.connectSafe(hiddenGain,this.ctx.destination);
 	this.dest = saturator;
-	this.analyzer = this.ctx.createAnalyser();
+	this.analyzer = this.ctx.createScriptProcessor(1024,1,1);
+	this.analyzer.addEventListener("audioprocess",function(e1) {
+		var input = e1.inputBuffer.getChannelData(0);
+		var _g1 = 0;
+		while(_g1 < 1024) {
+			var i1 = _g1++;
+			_gthis.waveDataBuffer[i1] = input[i1];
+		}
+	});
 	app_AudioNodeTools.connectSafe(this.masterGain,this.analyzer);
+	app_AudioNodeTools.connectSafe(this.analyzer,this.ctx.destination);
 	this.startedOnce = false;
 	this.suspended = true;
 	this.lastFrequency = 0;
@@ -1681,7 +1692,7 @@ app_WebAudioCompiler.prototype = {
 		}
 	}
 	,onNodeCreated: function(id,setting) {
-		console.log("src/app/WebAudioCompiler.hx:334:","node created: " + id);
+		console.log("src/app/WebAudioCompiler.hx:344:","node created: " + id);
 		var target;
 		var _g = setting.role;
 		switch(_g._hx_index) {
@@ -1774,7 +1785,7 @@ app_WebAudioCompiler.prototype = {
 		this.nodeMap.h[id] = new app__$WebAudioCompiler_NodeData(id,setting,target);
 	}
 	,onNodeDestroyed: function(id) {
-		console.log("src/app/WebAudioCompiler.hx:384:","node destroyed: " + id);
+		console.log("src/app/WebAudioCompiler.hx:394:","node destroyed: " + id);
 		this.nodeMap.remove(id);
 	}
 	,getNodeOf: function(id) {
@@ -1787,7 +1798,7 @@ app_WebAudioCompiler.prototype = {
 		}
 	}
 	,onSocketCreated: function(id,nodeId,type) {
-		console.log("src/app/WebAudioCompiler.hx:396:","socket created: " + id);
+		console.log("src/app/WebAudioCompiler.hx:406:","socket created: " + id);
 		var node = this.nodeMap.h[nodeId];
 		var target;
 		switch(type._hx_index) {
@@ -1863,7 +1874,7 @@ app_WebAudioCompiler.prototype = {
 		this.socketMap.h[id] = new app__$WebAudioCompiler_SocketData(id,nodeId,type,target);
 	}
 	,onSocketDestroyed: function(id) {
-		console.log("src/app/WebAudioCompiler.hx:452:","socket destroyed: " + id);
+		console.log("src/app/WebAudioCompiler.hx:462:","socket destroyed: " + id);
 		var s = this.socketMap.h[id];
 		var _g = s.type;
 		if(_g._hx_index == 0 && _g.io == true) {
@@ -1892,7 +1903,7 @@ app_WebAudioCompiler.prototype = {
 		this.socketMap.remove(id);
 	}
 	,onSocketConnected: function(id1,id2) {
-		console.log("src/app/WebAudioCompiler.hx:473:","connected: " + id1 + "->" + id2);
+		console.log("src/app/WebAudioCompiler.hx:483:","connected: " + id1 + "->" + id2);
 		var s2 = this.socketMap.h[id2];
 		var _g = this.socketMap.h[id1].target;
 		switch(_g._hx_index) {
@@ -1930,7 +1941,7 @@ app_WebAudioCompiler.prototype = {
 		}
 	}
 	,onSocketDisconnected: function(id1,id2) {
-		console.log("src/app/WebAudioCompiler.hx:501:","disconnected: " + id1 + "->" + id2);
+		console.log("src/app/WebAudioCompiler.hx:511:","disconnected: " + id1 + "->" + id2);
 		var s2 = this.socketMap.h[id2];
 		var _g = this.socketMap.h[id1].target;
 		switch(_g._hx_index) {
@@ -2013,7 +2024,6 @@ app_WebAudioCompiler.prototype = {
 		if(this.suspended) {
 			return;
 		}
-		this.analyzer.getFloatTimeDomainData(this.waveDataBuffer);
 		var _g = 0;
 		while(_g < 256) outArray.push(this.waveDataBuffer[_g++]);
 	}
@@ -4823,7 +4833,7 @@ pot_input_Input.prototype = {
 		};
 		elem.addEventListener("touchend",end);
 		elem.addEventListener("touchcancel",end);
-		var this2 = this.keyboard;
+		var this11 = this.keyboard;
 		var elem1 = window.document.body;
 		elem1.addEventListener("keydown",function(e3) {
 			var code = e3.keyCode;
@@ -4832,23 +4842,23 @@ pot_input_Input.prototype = {
 					e3.preventDefault();
 				}
 			}
-			if(!this2.keys.h.hasOwnProperty(code)) {
-				this2.keys.h[code] = new pot_input_Key();
+			if(!this11.keys.h.hasOwnProperty(code)) {
+				this11.keys.h[code] = new pot_input_Key();
 			}
-			this2.keys.h[code].press();
+			this11.keys.h[code].press();
 			return;
 		});
-		elem1.addEventListener("keyup",function(e4) {
-			var code1 = e4.keyCode;
-			if(e4.keyCode < 112 || e4.keyCode > 135) {
-				if(e4.cancelable) {
-					e4.preventDefault();
+		elem1.addEventListener("keyup",function(e11) {
+			var code1 = e11.keyCode;
+			if(e11.keyCode < 112 || e11.keyCode > 135) {
+				if(e11.cancelable) {
+					e11.preventDefault();
 				}
 			}
-			if(!this2.keys.h.hasOwnProperty(code1)) {
-				this2.keys.h[code1] = new pot_input_Key();
+			if(!this11.keys.h.hasOwnProperty(code1)) {
+				this11.keys.h[code1] = new pot_input_Key();
 			}
-			this2.keys.h[code1].release();
+			this11.keys.h[code1].release();
 			return;
 		});
 	}

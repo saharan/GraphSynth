@@ -184,9 +184,11 @@ class WebAudioCompiler implements GraphListener {
 	var socketMap:Map<Int, SocketData> = new Map();
 	var dest:AudioNode;
 	var masterGain:GainNode;
-	var analyzer:AnalyserNode;
+	var analyzer:AudioNode;
 	var startedOnce:Bool;
 	var lastFrequency:Float;
+
+	final waveDataBuffer:Float32Array = new Float32Array(1024);
 
 	public function new() {
 		ctx = untyped __js__("new (window.AudioContext || window.webkitAudioContext)()");
@@ -217,8 +219,16 @@ class WebAudioCompiler implements GraphListener {
 		hiddenGain.connectSafe(ctx.destination);
 		dest = saturator;
 
-		analyzer = ctx.createAnalyser();
+		analyzer = ctx.createScriptProcessor(1024, 1, 1);
+		analyzer.addEventListener("audioprocess", function(e:AudioProcessingEvent):Void {
+			var input = e.inputBuffer.getChannelData(0);
+			for (i in 0...1024) {
+				waveDataBuffer[i] = input[i];
+			}
+		});
+
 		masterGain.connectSafe(analyzer);
+		analyzer.connectSafe(ctx.destination);
 
 		startedOnce = false;
 		suspended = true;
@@ -550,16 +560,12 @@ class WebAudioCompiler implements GraphListener {
 		}
 	}
 
-	final waveDataBuffer:Float32Array = new Float32Array(1024);
-
 	public function onWaveDataRequest(outArray:Array<Float>):Void {
 		if (suspended) {
 			return;
 		}
 
-		var outSize = 256;
-
-		analyzer.getFloatTimeDomainData(waveDataBuffer);
+		var outSize = 256; // must not exceed 1024
 		for (i in 0...outSize) {
 			outArray.push(waveDataBuffer[i]);
 		}
