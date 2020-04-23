@@ -11,10 +11,13 @@ A node-based graphical synthesizer.
 長押しでメニューが開きます。  
 ![](./tutorial/tutorial2.gif)
 1. Connect oscillators to the output node.  
-**Double tap and drag** to connect cables.  
+**Double tap and drag** to connect nodes and cables.  
 オシレータを出力ノードに繋げると音が鳴ります。  
 **ダブルタップしてから離さずにドラッグ**すると線を繋ぎます。  
 ![](./tutorial/tutorial3.gif)
+1. Double tap cables to cut them.  
+線をダブルタップすると切れます。  
+![](./tutorial/tutorial3.5.gif)
 1. Connect envelopes to control volume by the keyboard.  
 エンベロープを繋げるとキーボードで音量を操作できます。  
 ![](./tutorial/tutorial4.gif)
