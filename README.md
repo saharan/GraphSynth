@@ -24,7 +24,7 @@ A node-based graphical synthesizer.
 ノードを2回タップして編集画面を開きます。  
 ![](./tutorial/edit.gif)
 
-1. Modulize a part of the graph.  
+1. Modularize a part of the graph.  
 グラフの一部をモジュール化します。  
 ![](./tutorial/modularize.gif)
 
