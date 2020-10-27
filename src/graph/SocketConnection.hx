@@ -1,7 +1,5 @@
 package graph;
 
-import graph.serial.SocketConnectionData;
-
 class SocketConnection {
 	public var from:Socket;
 	public var to:Socket;
@@ -21,6 +19,20 @@ class SocketConnection {
 
 	public function nearestEdge(s:Socket):Edge {
 		return s == from ? firstEdge : lastEdge;
+	}
+
+	public function getIntermediateVertices():Array<Vertex> {
+		var res:Array<Vertex> = [];
+		var prevV = firstEdge.v1;
+		var v = firstEdge.v2;
+		var info = new CableInfo();
+		while (v != lastEdge.v2) {
+			res.push(v);
+			v.followCable(prevV, info);
+			prevV = v;
+			v = info.vertex;
+		}
+		return res;
 	}
 
 	public static function indexOf(array:Array<SocketConnection>, from:Socket, to:Socket):Int {

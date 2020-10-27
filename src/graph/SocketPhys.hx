@@ -3,8 +3,8 @@ package graph;
 import js.html.CanvasElement;
 
 class SocketPhys {
-	static inline final RADIUS_SMALL:Float = 2.0;
-	static inline final RADIUS_LARGE:Float = 4.0;
+	public static inline final RADIUS_SMALL:Float = 2.0;
+	public static inline final RADIUS_LARGE:Float = 4.0;
 	static inline final INV_MASS:Float = 1 / 5.0;
 
 	public final socket:Socket;
@@ -28,7 +28,8 @@ class SocketPhys {
 			case Normal(_): RADIUS_SMALL;
 			case Param(_) | Module(_): RADIUS_LARGE;
 		};
-		vertex = g.createVertex(nodePhys.vertex.point.x + Math.random() * 2 - 1, nodePhys.vertex.point.y + Math.random() * 2 - 1, Socket(socket), INV_MASS);
+		vertex = g.createVertex(nodePhys.vertex.point.x + Math.random() * 2 - 1, nodePhys.vertex.point.y + Math.random() * 2 - 1,
+			Socket(socket), INV_MASS);
 		edge = g.createEdge(nodePhys.vertex, vertex, nodePhys.radius + radius * 2);
 		xForDrawing = 0;
 		yForDrawing = 0;

@@ -23,6 +23,38 @@
             height: 100%;
         }
 
+        #cover {
+            box-sizing: border-box;
+            width: 100%;
+            height: 100%;
+            padding-bottom: 30vh;
+            cursor: pointer;
+            position: absolute;
+            background-color: rgba(96, 96, 96, 0.6);
+            display: flex;
+            align-content: center;
+            justify-content: center;
+        }
+
+        #cover.hidden {
+            display: none;
+        }
+
+        #cover-text {
+            color: #fff;
+            font-size: calc(min(8vw, 8vh));
+            font-weight: bold;
+            font-family: "Courier New";
+            margin-top: auto;
+            margin-bottom: auto;
+            user-select: none;
+            opacity: 1.0;
+        }
+
+        #cover:active {
+            background-color: rgba(48, 48, 48, 0.6);
+        }
+
         #canvas {
             width: 100%;
             height: 100%;
@@ -43,14 +75,6 @@
             top: 6px;
             display: flex;
             justify-content: flex-end;
-        }
-
-        #buttons-bl {
-            position: absolute;
-            left: 6px;
-            bottom: calc(20% + 6px);
-            display: flex;
-            justify-content: flex-start;
         }
 
         .btn {
@@ -90,16 +114,10 @@
 </head>
 
 <body>
+    <div id="cover" class="hidden">
+        <div id="cover-text"></div>
+    </div>
     <div id="wrapper"><canvas id="canvas"></canvas></div>
-    <div id="buttons-tl">
-        <div class="btn highlighted" id="toggle">Play</div>
-        <div class="btn" id="export">Export</div>
-        <div class="btn" id="import">Import</div>
-    </div>
-    <div id="buttons-bl">
-        <div class="btn rect" id="up">+</div>
-        <div class="btn rect" id="down">-</div>
-    </div>
     <div id="buttons-tr">
         <a href="https://github.com/saharan/GraphSynth/" target="_blank">
             <div class="btn rect">

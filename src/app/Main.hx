@@ -1,38 +1,57 @@
 package app;
 
-import graph.Vertex;
+import app.ui.view.main.graph.ClickSettings;
+import pot.input.Keyboard;
+import haxe.Serializer;
+import app.graphics.Graphics;
+import app.ui.Sprite;
+import app.ui.Stage;
+import app.ui.core.Element;
+import app.ui.core.layout.FlexLayout;
+import app.ui.core.layout.OverlayLayout;
+import app.ui.view.main.KeyboardSprite;
+import app.ui.view.main.MainSprite;
+import app.ui.view.main.PointerDetector;
+import app.ui.view.menu.EventStopper;
+import app.ui.view.menu.Menu;
+import common.Pair;
 import graph.Graph;
-import haxe.Json;
 import graph.serial.GraphData;
+import graph.serial.NodeFilter;
+import haxe.Json;
 import js.Browser;
+import js.html.MouseEvent;
 import pot.core.App;
 import pot.input.Input;
-import render.Renderer;
 
-class Main extends App {
+using common.FloatTools;
+
+class Main extends App implements MainOperator {
 	public static var inputForDebug:Input;
 
-	var renderer:Renderer;
-	var pixelRatio:Int;
+	var stage:Stage;
+	var octaveBase:Int = 4;
 
 	public function new() {
 		super(cast Browser.document.getElementById("canvas"), true);
 	}
 
 	override function setup() {
-		pixelRatio = Std.int(Browser.window.devicePixelRatio);
-		pot.sizeMax(pixelRatio);
+		pot.resize(400, 500, 1);
 
-		var width = 0;
-		var height = 0;
+		var isMobile = ~/iPhone|Android.*Mobile/.match(Browser.window.navigator.userAgent);
+		if (isMobile)
+			ClickSettings.setForMobiles();
+		else
+			ClickSettings.setForDesktops();
+
 		function resize():Void {
-			var w = canvas.parentElement.offsetWidth * pixelRatio;
-			var h = canvas.parentElement.offsetHeight * pixelRatio;
-			if (width != w || height != h) {
-				width = w;
-				height = h;
-				canvas.width = width;
-				canvas.height = height;
+			var newPixelRatio = Browser.window.devicePixelRatio;
+			var w = Math.ceil(canvas.parentElement.offsetWidth * newPixelRatio);
+			var h = Math.ceil(canvas.parentElement.offsetHeight * newPixelRatio);
+			if (pot.pixelRatio != newPixelRatio || pot.width != w || pot.height != h) {
+				pot.resize(w, h, newPixelRatio);
+				rescaleRenderer();
 			}
 		}
 		canvas.style.width = null;
@@ -49,34 +68,186 @@ class Main extends App {
 		pot.start();
 	}
 
+	function rescaleRenderer():Void {
+		if (stage == null)
+			return;
+		var minW = 300;
+		var minH = 375;
+
+		var screenW = canvas.width;
+		var screenH = canvas.height;
+
+		inline function min(a:Float, b:Float, c:Float):Float {
+			var ab = a < b ? a : b;
+			return ab < c ? ab : c;
+		}
+
+		var scaleW = screenW / minW;
+		var scaleH = screenH / minH;
+		var maxScale = pot.pixelRatio * 2;
+		var scale = min(scaleW, scaleH, maxScale);
+
+		stage.resize(screenW / scale, screenH / scale);
+		stage.scale = scale;
+
+		trace('scaling: window = ($screenW, $screenH), target = ($minW, $minH), scale = $scale');
+	}
+
+	var keyboardSprite:KeyboardSprite;
+	var mainSprite:MainSprite;
+	var menuWrapper:Sprite;
+	var menuesToOpen:Array<Menu> = [];
+	var menuesOpening:Array<Menu> = [];
+
+	var compiler:WebAudioCompiler;
+
 	function init():Void {
+		stage = new Stage(input, new Graphics(canvas));
+
+		var wrapper = new Sprite(new Element());
+		wrapper.style.size.set(Percent(100), Percent(100));
+		wrapper.layout = new FlexLayout(Y);
+
 		compiler = new WebAudioCompiler();
-		var doc = Browser.document;
-		var playing = false;
-		var toggle = doc.getElementById("toggle");
-		toggle.addEventListener("click", () -> {
-			if (playing) {
-				compiler.stop();
-			} else {
-				compiler.start();
-			}
-			playing = !playing;
-			if (playing) {
-				toggle.classList.remove("highlighted");
-				toggle.innerText = "Mute";
-			} else {
-				toggle.classList.add("highlighted");
-				toggle.innerText = "Play";
-			}
-		});
-		doc.getElementById("export").addEventListener("click", () -> {
+
+		var g = new Graph(compiler);
+
+		mainSprite = new MainSprite(g, this);
+		wrapper.addChild(mainSprite);
+		keyboardSprite = new KeyboardSprite(() -> octaveBase, this);
+		wrapper.addChild(keyboardSprite);
+
+		var root = stage.root;
+		root.element.layout = new OverlayLayout();
+		root.addChild(wrapper);
+
+		// menu = new Menu();
+		// root.addChild(menu);
+		// root.addChild(new EditNumberDialogue(100, _ -> {}, () -> {}));
+		menuWrapper = new Sprite();
+		menuWrapper.layout = new OverlayLayout();
+		menuWrapper.style.size.set(Percent(100), Percent(100));
+		root.addChild(menuWrapper);
+
+		root.addChild(new PointerDetector());
+
+		rescaleRenderer();
+
+		showModalDialogue("Click to Play", compiler.start);
+	}
+
+	function showModalDialogue(text:String, onClick:Void->Void):Void {
+		var cover = Browser.document.getElementById("cover");
+		var coverText = Browser.document.getElementById("cover-text");
+		coverText.innerText = text;
+		var listener:MouseEvent->Void = null;
+		listener = e -> {
+			onClick();
+			cover.removeEventListener("click", listener);
+			cover.classList.add("hidden");
+		}
+		cover.addEventListener("click", listener);
+		cover.classList.remove("hidden");
+	}
+
+	function importData():Pair<LoadResult, Pair<GraphData, Graph>> {
+		var text = Browser.window.prompt("Input text data");
+		if (text == null || text == "")
+			return Pair.of(LoadResult.Cancelled, null);
+		try {
+			var data = Json.parse(text);
+			var g = Graph.deserialize(data);
+			return Pair.of(LoadResult.Succeeded, Pair.of(data, g));
+		} catch (e) {
+			Browser.alert("invalid data");
+			return Pair.of(LoadResult.Failed, null);
+		}
+	}
+
+	// ------------------------------------------- <op>
+
+	public function reset():Void {
+		mainSprite.resetGraph();
+	}
+
+	public function changeOctave(diff:Int):Void {
+		octaveBase += diff;
+		if (octaveBase < 0)
+			octaveBase = 0;
+		if (octaveBase > 9)
+			octaveBase = 9;
+	}
+
+	public function selectNodeCreation(n:NodeInfo):Void {
+		mainSprite.selectNodeCreation(n);
+	}
+
+	public function showInfo(text:String, type:InfoType):Void {
+		mainSprite.showInfo(text, type);
+	}
+
+	public function hideInfo():Void {
+		mainSprite.hideInfo();
+	}
+
+	public function closeToolbar():Void {
+		mainSprite.closeToolbar();
+	}
+
+	public function gotoGraph(graph:Graph):Void {
+		mainSprite.gotoGraph(graph);
+	}
+
+	public function loadAsRoot(data:GraphData, vibration:Bool):Void {
+		mainSprite.loadAsRoot(data, vibration);
+	}
+
+	public function openMenu(menu:Menu):Void {
+		menuesToOpen.push(menu);
+	}
+
+	public function copy(data:GraphData):Void {
+		mainSprite.copy(data);
+	}
+
+	public function paste():Bool {
+		return mainSprite.paste();
+	}
+
+	public function importGraph():LoadResult {
+		var pair = importData();
+		switch pair.a {
+			case Succeeded:
+				var data = pair.b.a;
+				var g = pair.b.b;
+				if (!g.containsOutput()) {
+					// add an output node automatically
+					var maxX = 0.0;
+					for (node in g.nodes) {
+						maxX = maxX.max(node.getX());
+					}
+					NodeList.OUTPUT.create(g, maxX + 80, 0, false);
+					data = g.serialize(NodeFilter.ALL, false);
+				}
+				mainSprite.loadAsRoot(data, true);
+				return Succeeded;
+			case Failed:
+				return Failed;
+			case Cancelled:
+				return Cancelled;
+		}
+	}
+
+	public function exportData(data:GraphData):Void {
+		trace(Serializer.run(data));
+
+		var text = Json.stringify(data);
+
+		showModalDialogue("Copying...", () -> {
+			var doc = Browser.document;
 			var input = doc.createPreElement();
 			doc.body.appendChild(input);
-			var rootGraph = control.graph;
-			while (rootGraph.parent != null) {
-				rootGraph = rootGraph.parent;
-			}
-			input.innerText = Json.stringify(rootGraph.serialize());
+			input.innerText = text;
 
 			var sel = doc.getSelection();
 			sel.selectAllChildren(input);
@@ -84,196 +255,66 @@ class Main extends App {
 			sel.removeAllRanges();
 			doc.body.removeChild(input);
 
-			Browser.alert("copied!");
+			showInfo("Copied!", Info);
 		});
-		doc.getElementById("import").addEventListener("click", () -> {
-			var text = Browser.window.prompt("paste saved text");
-			if (text == null || text == "")
-				return;
-			try {
-				var data:GraphData = Json.parse(text);
-				var rootGraph = control.graph;
-				while (rootGraph.parent != null) {
-					rootGraph = rootGraph.parent;
-				}
-				var nextGraph = Graph.deserialize(data, rootGraph.listener);
-				rootGraph.destroyEverything();
-				control.renderer.view.centerX = 0;
-				control.renderer.view.centerY = 0;
-				control.nextControl = new MainControl(control.context.changeGraph(nextGraph));
-			} catch (e:Any) {
-				// do nothing
-				Browser.alert("couldn't load: " + e);
-			}
-		});
-		doc.getElementById("up").addEventListener("click", () -> {
-			octaveShift++;
-			prevKeyIndex = -1;
-			if (octaveShift > 8)
-				octaveShift = 8;
-		});
-		doc.getElementById("down").addEventListener("click", () -> {
-			octaveShift--;
-			prevKeyIndex = -1;
-			if (octaveShift < 1)
-				octaveShift = 1;
-		});
-
-		var graph = new Graph(compiler);
-		NodeList.OUTPUT.create(graph, 0, 0);
-
-		renderer = new Renderer(canvas);
-		renderer.view.scale = (1 + (pixelRatio - 1) * 0.8) * 1.6;
-		control = new MainControl(new Context(canvas, graph, renderer, new Clipboard()));
 	}
 
-	var cableFrom:Vertex;
-	var dragging:Vertex;
+	public function importModule():LoadResult {
+		var pair = importData();
+		switch pair.a {
+			case Succeeded:
+				var data = pair.b.a;
+				var g = pair.b.b;
+				if (g.containsOutput()) {
+					// delete the output node automatically
+					data = g.serialize(new NodeFilter(node -> !node.setting.role.match(Destination)), false);
+				}
+				mainSprite.paste(data, "import");
+				return Succeeded;
+			case Failed:
+				return Failed;
+			case Cancelled:
+				return Cancelled;
+		}
+	}
 
-	var ppress:Bool = false;
-	var pressCount:Int = 0;
-	var touchId:Int = -1;
+	public function getTopMenu():Null<Menu> {
+		if (menuesOpening.length == 0)
+			return null;
+		return menuesOpening[menuesOpening.length - 1];
+	}
 
-	var beginWorldX:Float = 0;
-	var beginWorldY:Float = 0;
-	var beginCanvasX:Float = 0;
-	var beginCanvasY:Float = 0;
+	public function getKeyboard():Keyboard {
+		return input.keyboard;
+	}
 
-	var prevPressFrame:Int;
-	var pressFrame:Int;
-	var continuousPressCount:Int = 0;
+	public function attack():Void {
+		compiler.attack();
+	}
 
-	var createNodeMode:Bool = false;
-	var menuShowCount:Int = 0;
+	public function release():Void {
+		compiler.release();
+	}
 
-	var control:Control;
+	public function setFrequency(f:Float, time:Float):Void {
+		compiler.setFrequency(f, time);
+	}
 
-	var prevX:Float = 0;
-	var prevY:Float = 0;
-
-	var compiler:WebAudioCompiler;
-
-	var touchingBelow:Bool = false;
-	var prevKeyIndex:Int = -1;
-
-	var octaveShift:Int = 4;
+	// ------------------------------------------- </op>
 
 	override function loop() {
-		var x:Float = prevX;
-		var y:Float = prevY;
-		var press:Bool = false;
-
-		var hasTouchInput:Bool = false;
-		if (touchId == -1 && input.touches.length > 0) {
-			touchId = input.touches[0].id;
+		for (menu in menuesToOpen) {
+			menuWrapper.addChild(menu);
+			menuesOpening.push(menu);
 		}
-		for (t in input.touches) {
-			if (t.id != touchId)
-				continue;
-			hasTouchInput = true;
-			press = t.touching;
-			x = t.x;
-			y = t.y;
-			control.lastInputSource = Touch;
+		if (menuesToOpen.length > 0) {
+			menuWrapper.addChild(new EventStopper(Menu.ANIMATION_DURATION));
 		}
-		if (!hasTouchInput) {
-			touchId = -1;
-			press = input.mouse.left;
-			if (press || input.mouse.dx != 0 || input.mouse.dy != 0) {
-				x = input.mouse.x;
-				y = input.mouse.y;
-				control.lastInputSource = Mouse;
-			}
-		}
-
-		var gx = renderer.worldX(x);
-		var gy = renderer.worldY(y);
-
-		// process user inputs
-
-		if (!ppress && press && y > canvas.height * 0.8) {
-			touchingBelow = true;
-			compiler.attack();
-		}
-		if (!press) {
-			if (touchingBelow) {
-				compiler.release();
-			}
-			touchingBelow = false;
-		}
-
-		if (!ppress && press && !touchingBelow) {
-			prevPressFrame = pressFrame;
-			pressFrame = frameCount;
-
-			var dx = beginCanvasX - x;
-			var dy = beginCanvasY - y;
-			if (dx * dx + dy * dy > UISetting.dragBeginThreshold * UISetting.dragBeginThreshold)
-				continuousPressCount = 0;
-			if (frameCount > prevPressFrame + UISetting.longPressTimeThreshold)
-				continuousPressCount = 0;
-			continuousPressCount++;
-
-			beginCanvasX = x;
-			beginCanvasY = y;
-			beginWorldX = renderer.worldX(beginCanvasX);
-			beginWorldY = renderer.worldY(beginCanvasY);
-		}
-
-		if (press || ppress) {
-			pressCount++;
-		} else {
-			pressCount = 0;
-			dragging = null;
-			cableFrom = null;
-		}
-
-		if (!press && ppress && !touchingBelow) {
-			control.onReleased(gx, gy, continuousPressCount);
-		}
-
-		if (press && pressCount < UISetting.longPressTimeThreshold && !touchingBelow) {
-			var dx = beginCanvasX - x;
-			var dy = beginCanvasY - y;
-			if (dx * dx + dy * dy > UISetting.dragBeginThreshold * UISetting.dragBeginThreshold) {
-				control.onDragBegin(beginWorldX, beginWorldY, continuousPressCount);
-				continuousPressCount = 0;
-				pressCount = 100;
-			}
-		}
-		if (press && pressCount == UISetting.longPressTimeThreshold && !touchingBelow) {
-			control.onLongPress(beginWorldX, beginWorldY, continuousPressCount);
-			continuousPressCount = 0;
-		}
-		if (press && ppress && !touchingBelow) {
-			control.onPressing(gx, gy);
-		}
-
-		control.step(gx, gy, press && ppress && !touchingBelow);
-
-		renderer.fill(0.9, 0.9, 0.9);
-		renderer.context().fillRect(0, canvas.height * 0.8, canvas.width, canvas.height * 0.2);
-		
-		var keyIndex = renderer.renderKeyboard(0, canvas.height * 0.8, canvas.width, canvas.height * 0.2, "C" + octaveShift, x, y, press);
-		if (keyIndex != -1 && keyIndex != prevKeyIndex && press) {
-			var time = 0.001;
-			if (!ppress) {
-				time = 0;
-			}
-			prevKeyIndex = keyIndex;
-			var freq = 440 * Math.pow(2, (octaveShift - 4) + (keyIndex - 9) / 12);
-			compiler.setFrequency(freq, time);
-		}
-
-		renderer.renderTouch(x, y, press && ppress);
-
-		if (control.nextControl != null) {
-			control = control.nextControl;
-		}
-
-		ppress = press;
-		prevX = x;
-		prevY = y;
+		menuesOpening = menuesOpening.filter(menu -> menu.parent != null);
+		menuesToOpen.resize(0);
+		stage.update();
+		canvas.style.cursor = stage.cursor;
+		stage.draw();
 	}
 
 	static function main() {

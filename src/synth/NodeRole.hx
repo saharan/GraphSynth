@@ -1,8 +1,6 @@
 package synth;
 
 import graph.BinOpType;
-import graph.serial.NodeRoleData;
-import synth.EnvelopeData;
 
 @:using(synth.NodeRole.NodeRoleTools)
 enum NodeRole {

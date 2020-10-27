@@ -10,31 +10,25 @@ import pot.util.Timer;
 class Pot {
 	public var width(default, null):Int;
 	public var height(default, null):Int;
-	public var pixelScalingRatio(default, null):Int;
-	
+	public var pixelRatio(default, null):Float;
+
 	var app:App;
 	var canvas:CanvasElement;
 	var timer:Timer;
-	@:allow(pot.input)
 
+	@:allow(pot.input)
 	public function new(app:App, canvas:CanvasElement) {
 		this.app = app;
 		this.canvas = canvas;
 		timer = new Timer(frame);
 	}
 
-	public function sizeMax(pixelScalingRatio:Int = 1):Void {
-		size(Browser.window.innerWidth, Browser.window.innerHeight, pixelScalingRatio);
-	}
-
-	public function size(width:Int, height:Int, pixelScalingRatio:Int = 1):Void {
+	public function resize(width:Int, height:Int, pixelRatio:Float = 1):Void {
 		this.width = width;
 		this.height = height;
-		this.pixelScalingRatio = pixelScalingRatio;
-		canvas.width = width * pixelScalingRatio;
-		canvas.height = height * pixelScalingRatio;
-		canvas.style.width = width + "px";
-		canvas.style.height = height + "px";
+		this.pixelRatio = pixelRatio;
+		canvas.width = width;
+		canvas.height = height;
 	}
 
 	public function frameRate(fps:Float):Void {

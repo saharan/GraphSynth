@@ -1,29 +1,43 @@
 package graph;
 
-import render.View;
-import graph.serial.SocketConnectionData;
-import graph.serial.NodeData;
+import common.Pair;
+import common.Set;
 import graph.serial.GraphData;
+import graph.serial.NodeData;
+import graph.serial.NodeFilter;
+import graph.serial.SocketConnectionData;
 import phys.World;
+import render.View;
+
+using common.FloatTools;
 
 private class EmptyGraphListener implements GraphListener {
-	public function new() {}
+	public function new() {
+	}
 
-	public function onNodeCreated(id:Int, setting:NodeSetting):Void {}
+	public function onNodeCreated(id:Int, setting:NodeSetting):Void {
+	}
 
-	public function onNodeDestroyed(id:Int):Void {}
+	public function onNodeDestroyed(id:Int):Void {
+	}
 
-	public function onSocketCreated(id:Int, nodeId:Int, type:SocketType):Void {}
+	public function onSocketCreated(id:Int, nodeId:Int, type:SocketType):Void {
+	}
 
-	public function onSocketDestroyed(id:Int):Void {}
+	public function onSocketDestroyed(id:Int):Void {
+	}
 
-	public function onSocketConnected(id1:Int, id2:Int):Void {}
+	public function onSocketConnected(id1:Int, id2:Int):Void {
+	}
 
-	public function onSocketDisconnected(id1:Int, id2:Int):Void {}
+	public function onSocketDisconnected(id1:Int, id2:Int):Void {
+	}
 
-	public function onNodeUpdated(id:Int):Void {}
+	public function onNodeUpdated(id:Int):Void {
+	}
 
-	public function onWaveDataRequest(arrayOut:Array<Float>):Void {}
+	public function onWaveDataRequest(arrayOut:Array<Float>):Void {
+	}
 }
 
 class Graph {
@@ -36,6 +50,9 @@ class Graph {
 	public final nodes:Array<Node>;
 	public final vertices:Array<Vertex>;
 	public final edges:Array<Edge>;
+	public final id:Int;
+
+	static var idCount:Int = 0;
 
 	static var dfsCount:Int = 1;
 
@@ -43,14 +60,65 @@ class Graph {
 
 	public var listener:GraphListener;
 
-	public var parent:Graph;
+	public var parentModule:Node;
 
-	public function new(listener:GraphListener = null) {
+	public function new(listener:GraphListener = null, id:Int = -1) {
 		this.listener = listener != null ? listener : new EmptyGraphListener();
 		world = new World();
 		nodes = [];
 		vertices = [];
 		edges = [];
+		this.id = if (id == -1) {
+			++idCount;
+		} else {
+			id;
+		}
+	}
+
+	public function getRoot():Graph {
+		var res = this;
+		while (res.parentModule != null) {
+			res = res.parentModule.g;
+		}
+		return res;
+	}
+
+	public function getPath():Array<Graph> {
+		var path = [];
+		var at = this;
+		path.push(at);
+		while (at.parentModule != null) {
+			at = at.parentModule.g;
+			path.push(at);
+		}
+		path.reverse();
+		return path;
+	}
+
+	public static function searchGraphById(root:Graph, id:Int):Graph {
+		function search(next:Graph):Graph {
+			if (next.id == id) {
+				return next; // found
+			}
+			for (node in next.nodes) {
+				if (node.type.match(Module(_, _))) {
+					var res = search(node.moduleGraph);
+					if (res != null)
+						return res; // found in subgraph
+				}
+			}
+			return null;
+		}
+		return search(root);
+	}
+
+	public function containsOutput():Bool {
+		for (node in nodes) {
+			if (node.setting.role.match(Destination)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	public function bakeView(view:View):Void {
@@ -60,6 +128,27 @@ class Graph {
 		}
 		view.centerX = 0;
 		view.centerY = 0;
+	}
+
+	public function moveCenterToZero():Void {
+		var minX = 1e9;
+		var minY = 1e9;
+		var maxX = -1e9;
+		var maxY = -1e9;
+		for (n in nodes) {
+			var x = n.getX();
+			var y = n.getY();
+			minX = minX.min(x);
+			minY = minY.min(y);
+			maxX = maxX.max(x);
+			maxY = maxY.max(y);
+		}
+		var cx = (minX + maxX) * 0.5;
+		var cy = (minY + maxY) * 0.5;
+		for (v in vertices) {
+			v.point.x -= cx;
+			v.point.y -= cy;
+		}
 	}
 
 	public function createNode(x:Float, y:Float, type:NodeType, setting:NodeSetting):Node {
@@ -76,7 +165,7 @@ class Graph {
 
 		if (node.type.match(Module(_))) {
 			node.moduleGraph = Graph.deserialize(data.graph, listener);
-			node.moduleGraph.parent = this;
+			node.moduleGraph.parentModule = node;
 			node.moduleBoundaries = data.boundaries.map(index -> node.moduleGraph.nodes[index]);
 		}
 
@@ -119,14 +208,17 @@ class Graph {
 	}
 
 	public function createModule(nodesToContain:Array<Node>):Node {
-		var boundaries = [];
-		var cableEdges = [];
-		isolateNodesAndCutCables(nodesToContain, boundaries, cableEdges);
+		var pair = isolateNodesAndCutCables(nodesToContain);
+		var boundaries = pair.a;
+		var cableEdges = pair.b;
 		return createModuleAndConnectCables(nodesToContain, boundaries, cableEdges);
 	}
 
-	function isolateNodesAndCutCables(nodesToContain:Array<Node>, outBoundaries:Array<Node>, outCableEdges:Array<Vertex>):Void {
-		var boundaryName:String = "A";
+	function isolateNodesAndCutCables(nodesToContain:Array<Node>):Pair<Array<Node>, Array<Vertex>> {
+		var boundaries:Array<Node> = [];
+		var cableEdges:Array<Vertex> = [];
+		var inBoundaries:Array<Node> = [];
+		var outBoundaries:Array<Node> = [];
 		for (n in nodesToContain) {
 			for (s in n.sockets) {
 				for (c in s.connections) {
@@ -143,10 +235,19 @@ class Graph {
 						var ratio = 0.9;
 						var boundaryX = v1.point.x + (v2.point.x - v1.point.x) * ratio;
 						var boundaryY = v1.point.y + (v2.point.y - v1.point.y) * ratio;
-						var boundaryNode = createNode(boundaryX, boundaryY, Boundary(s2.type.io()), new NodeSetting(boundaryName, Dupl));
+						final io = s2.type.io();
+						var boundaryNode = createNode(boundaryX, boundaryY, Boundary(s2.type.io()), new NodeSetting("", Dupl));
 
-						outBoundaries.push(boundaryNode);
-						boundaryName = String.fromCharCode(boundaryName.charCodeAt(0) + 1);
+						switch io {
+							case O:
+								boundaryNode.setting.name = "in";
+								inBoundaries.push(boundaryNode);
+							case I:
+								boundaryNode.setting.name = "out";
+								outBoundaries.push(boundaryNode);
+						}
+
+						boundaries.push(boundaryNode);
 
 						var boundarySocketPhys = boundaryNode.createSocket(Normal(s2.type.io())).phys;
 						boundarySocketPhys.lookAt(n1v.point.x, n1v.point.y);
@@ -156,7 +257,7 @@ class Graph {
 						var cutCableSocket1Side = edgeToCut.other(s2p.vertex);
 						var cutCableSocket2Side = v2;
 						destroyEdge(edgeToCut);
-						outCableEdges.push(cutCableSocket2Side);
+						cableEdges.push(cutCableSocket2Side);
 
 						// connect socket1's side to the boundary node
 						switch (s.type.io()) {
@@ -169,6 +270,19 @@ class Graph {
 				}
 			}
 		}
+
+		inline function addNumber(nodes:Array<Node>):Void {
+			if (nodes.length <= 1)
+				return;
+			for (i in 0...nodes.length) {
+				nodes[i].setting.name += i + 1;
+			}
+		}
+
+		addNumber(inBoundaries);
+		addNumber(outBoundaries);
+
+		return Pair.of(boundaries, cableEdges);
 	}
 
 	function createModuleAndConnectCables(nodesToContain:Array<Node>, boundaries:Array<Node>, cables:Array<Vertex>):Node {
@@ -184,7 +298,12 @@ class Graph {
 		meanY /= nodesToContain.length;
 
 		var module = createNode(meanX, meanY, Module(false, false), new NodeSetting("mod", None));
-		module.moduleBoundaries = boundaries;
+		module.moduleBoundaries = boundaries.copy();
+		module.moduleBoundaries.sort((b1, b2) -> {
+			var a = b1.setting.name;
+			var b = b2.setting.name;
+			return a < b ? -1 : a > b ? 1 : 0;
+		});
 
 		updateConnections(); // must update connections before transfer
 		transferModule(nodesToContain.concat(boundaries), module.moduleGraph);
@@ -348,6 +467,9 @@ class Graph {
 	}
 
 	public function decomposeModule(node:Node):Void {
+		if (!node.type.match(Module(_, _)))
+			throw "can only decompose modules";
+
 		var g = node.moduleGraph;
 		var bv = g.computeBoundingVolume();
 		var np = node.phys;
@@ -356,8 +478,8 @@ class Graph {
 		for (v in g.vertices) {
 			v.point.x -= bv.x;
 			v.point.y -= bv.y;
-			v.point.x *= 0.5;
-			v.point.y *= 0.5;
+			v.point.x *= 0.75;
+			v.point.y *= 0.75;
 			v.point.x += np.vertex.point.x;
 			v.point.y += np.vertex.point.y;
 		}
@@ -377,8 +499,10 @@ class Graph {
 		for (s in node.sockets) {
 			var sp = s.phys;
 			var parent = switch (s.type) {
-				case Module(_, boundary): boundary;
-				case _: throw "not a module socket";
+				case Module(_, boundary):
+					boundary;
+				case _:
+					throw "not a module socket";
 			};
 			var index = boundaries.indexOf(parent);
 			var edges = sp.vertex.edges.copy();
@@ -444,7 +568,7 @@ class Graph {
 		}
 	}
 
-	public function connectCable(from:Vertex, to:Vertex):Void {
+	public function connectCable(from:Vertex, to:Vertex, vibration:Bool = true):Void {
 		var dx:Float = to.point.x - from.point.x;
 		var dy:Float = to.point.y - from.point.y;
 		var dist:Float = Math.sqrt(dx * dx + dy * dy);
@@ -462,20 +586,22 @@ class Graph {
 			dist -= interval;
 			from = mid;
 		}
-		for (v in extended)
-			v.vibrate();
+		if (vibration) {
+			for (v in extended)
+				v.vibrate();
+		}
 		createEdge(from, to);
 	}
 
 	public function isConnectable(from:Vertex, to:Vertex):Bool {
-		if (from == to || !isOutput(from) || !isInput(to) || isInSameCable(from, to))
+		if (from == to || !isOutput(from) || !isInput(to) || isOnCableFrom(from, to))
 			return false;
 		return true;
 	}
 
-	public function connectVertices(from:Vertex, to:Vertex):Bool {
+	public function connectVertices(from:Vertex, to:Vertex):Void {
 		if (!isConnectable(from, to))
-			return false;
+			throw "cannot connect vertices";
 		var dx:Float = to.point.x - from.point.x;
 		var dy:Float = to.point.y - from.point.y;
 		var dist:Float = Math.sqrt(dx * dx + dy * dy);
@@ -503,24 +629,30 @@ class Graph {
 		}
 
 		connectCable(from, to);
-		return true;
 	}
 
 	function isOutput(v:Vertex):Bool {
 		return switch (v.type) {
 			case Node(n):
 				switch (n.type) {
-					case Normal(_, output): output;
-					case Module(_, output): output;
-					case Small: true;
-					case Boundary(io): io == O;
+					case Normal(_, output):
+						output;
+					case Module(_, output):
+						output;
+					case Small:
+						true;
+					case Boundary(io):
+						io == O;
 				}
 			case Socket(s):
 				switch (s.type.io()) {
-					case I: false;
-					case O: true;
+					case I:
+						false;
+					case O:
+						true;
 				}
-			case Normal: true;
+			case Normal:
+				true;
 		}
 	}
 
@@ -528,17 +660,24 @@ class Graph {
 		return switch (v.type) {
 			case Node(n):
 				switch (n.type) {
-					case Normal(input, _): input;
-					case Module(input, _): input;
-					case Small: true;
-					case Boundary(io): io == I;
+					case Normal(input, _):
+						input;
+					case Module(input, _):
+						input;
+					case Small:
+						true;
+					case Boundary(io):
+						io == I;
 				}
 			case Socket(s):
 				switch (s.type.io()) {
-					case I: true;
-					case O: false;
+					case I:
+						true;
+					case O:
+						false;
 				}
-			case Normal: true;
+			case Normal:
+				true;
 		}
 	}
 
@@ -571,13 +710,13 @@ class Graph {
 		}
 	}
 
-	function isInSameCable(v1:Vertex, v2:Vertex):Bool {
+	public function isOnCableFrom(v1Normal:Vertex, v2NormalOrSocket:Vertex):Bool {
 		var result = false;
 		dfs(v -> {
-			if (v == v2)
+			if (v == v2NormalOrSocket)
 				result = true;
 			return !result && v.type == Normal;
-		}, v1);
+		}, v1Normal);
 		return result;
 	}
 
@@ -637,6 +776,7 @@ class Graph {
 				var edgeBackToNode = sp.edge;
 				// follow cables from the socket
 				for (e in sp.vertex.edges) {
+					// except the edge that goes back to the node vertex
 					if (e == edgeBackToNode)
 						continue;
 					var prevV = sp.vertex;
@@ -644,12 +784,14 @@ class Graph {
 					var firstEdge = e;
 					var lastEdge = e;
 					var info = new CableInfo();
+					// iterate over the cable
 					while (v != null && v.type == Normal) {
 						v.followCable(prevV, info);
 						prevV = v;
 						v = info.vertex;
 						lastEdge = info.edge;
 					}
+					// the cable is cut
 					if (v == null)
 						continue;
 					switch (v.type) {
@@ -671,7 +813,8 @@ class Graph {
 			}
 		}
 
-		var newConnections:Array<Int> = [];
+		var newConnections:Array<Array<Int>> = [];
+		var nodesToUpdate:Set<Node> = new Set();
 
 		// add new connections and remove updated old connections
 		for (n in nodes) {
@@ -683,15 +826,17 @@ class Graph {
 					var oldIndex = SocketConnection.indexOf(s.prevConnections, s, s2);
 					if (oldIndex == -1) {
 						// add new connection
-						newConnections.push(s.id);
-						newConnections.push(s2.id);
+						newConnections.push([s.id, s2.id]);
+						nodesToUpdate.add(c.from.parent);
+						nodesToUpdate.add(c.to.parent);
 					} else {
+						// keep this connection
 						s.prevConnections.splice(oldIndex, 1);
 					}
 				}
 			}
 		}
-		// remove obsoleted connections
+		// remove obsolete connections
 		for (n in nodes) {
 			for (s in n.sockets) {
 				if (s.type.io() != O)
@@ -700,17 +845,18 @@ class Graph {
 					var s2 = c.to;
 					// remove old connection
 					listener.onSocketDisconnected(s.id, s2.id);
+					nodesToUpdate.add(c.from.parent);
+					nodesToUpdate.add(c.to.parent);
 				}
 			}
 		}
 		// notify new connections
-		for (i in 0...newConnections.length >> 1) {
-			listener.onSocketConnected(newConnections[i << 1], newConnections[i << 1 | 1]);
+		for (conn in newConnections) {
+			listener.onSocketConnected(conn[0], conn[1]);
 		}
+
 		// notify updates
-		for (n in nodes) {
-			n.notifyUpdate();
-		}
+		nodesToUpdate.forEach(n -> n.notifyUpdate());
 	}
 
 	public function stepPhysics():Void {
@@ -752,7 +898,7 @@ class Graph {
 			var i = -1;
 			while (++i < vertices.length) {
 				var v:Vertex = vertices[i];
-				if (!v.type.match(Normal))
+				if (!v.type.match(Normal) || v.selection.selected)
 					continue;
 				if (v.edges.length == 0) {
 					destroyVertex(v);
@@ -1015,13 +1161,17 @@ class Graph {
 				case Node(n):
 					if (flags & PickFlag.Node == 0)
 						continue;
-					r = n.phys.radius;
+					r = n.getRadius();
 				case Socket(s):
 					if ((flags & switch (s.type) {
-						case Normal(I): PickFlag.Input;
-						case Normal(O): PickFlag.Output;
-						case Param(I, _) | Module(I, _): PickFlag.InputParam;
-						case Param(O, _) | Module(O, _): PickFlag.OutputParam;
+						case Normal(I):
+							PickFlag.Input;
+						case Normal(O):
+							PickFlag.Output;
+						case Param(I, _) | Module(I, _):
+							PickFlag.InputParam;
+						case Param(O, _) | Module(O, _):
+							PickFlag.OutputParam;
 					}) == 0)
 						continue;
 					var sp = s.phys;
@@ -1076,11 +1226,15 @@ class Graph {
 		updateRequired = true;
 	}
 
-	public function serialize():GraphData {
+	public function serialize(filter:NodeFilter, keepIds:Bool):GraphData {
 		updateConnections();
 		var nodes:Array<NodeData> = [];
+		var filteredNodes:Array<Node> = [];
 		for (n in this.nodes) {
-			nodes.push(n.serialize());
+			if (filter.containNode(n)) {
+				nodes.push(n.serialize(filter, keepIds));
+				filteredNodes.push(n);
+			}
 		}
 		var connections:Array<SocketConnectionData> = [];
 		for (n in this.nodes) {
@@ -1090,10 +1244,14 @@ class Graph {
 				for (c in s.connections) {
 					var fromN = c.from.parent;
 					var toN = c.to.parent;
+					var n1 = filteredNodes.indexOf(fromN);
+					var n2 = filteredNodes.indexOf(toN);
+					if (n1 == -1 || n2 == -1)
+						continue;
 					connections.push({
-						n1: this.nodes.indexOf(fromN),
+						n1: n1,
 						s1: fromN.sockets.indexOf(c.from),
-						n2: this.nodes.indexOf(toN),
+						n2: n2,
 						s2: toN.sockets.indexOf(c.to)
 					});
 				}
@@ -1101,18 +1259,21 @@ class Graph {
 		}
 		return {
 			nodes: nodes,
-			connections: connections
+			connections: connections,
+			id: keepIds ? id : -1
 		}
 	}
 
-	public static function deserialize(data:GraphData, listener:GraphListener):Graph {
-		var g = new Graph(listener);
+	public static function deserializeInto(g:Graph, offsetX:Float, offsetY:Float, data:GraphData, vibration:Bool = true):Array<Node> {
+		if (data.id != -1)
+			throw "cannot deserialize graph data with its id into an existing graph";
+		var indexOffset = g.nodes.length;
 		for (n in data.nodes) {
-			var node = g.createNode(n.x, n.y, Node.deserializeType(n.type), NodeSetting.deserialize(n.setting));
+			var node = g.createNode(n.x + offsetX, n.y + offsetY, Node.deserializeType(n.type), NodeSetting.deserialize(n.setting));
 
 			if (node.type.match(Module(_))) {
-				node.moduleGraph = Graph.deserialize(n.graph, listener);
-				node.moduleGraph.parent = g;
+				node.moduleGraph = Graph.deserialize(n.graph, g.listener, vibration);
+				node.moduleGraph.parentModule = node;
 				node.moduleBoundaries = n.boundaries.map(index -> node.moduleGraph.nodes[index]);
 			}
 
@@ -1123,11 +1284,24 @@ class Graph {
 			}
 		}
 		for (c in data.connections) {
-			var s1 = g.nodes[c.n1].sockets[c.s1];
-			var s2 = g.nodes[c.n2].sockets[c.s2];
-			g.connectCable(s1.phys.vertex, s2.phys.vertex);
+			var s1 = g.nodes[indexOffset + c.n1].sockets[c.s1];
+			var s2 = g.nodes[indexOffset + c.n2].sockets[c.s2];
+			g.connectCable(s1.phys.vertex, s2.phys.vertex, vibration);
 		}
 		g.updateConnections();
-		return g;
+		var addedNodes = g.nodes.slice(indexOffset);
+		for (node in addedNodes) {
+			node.notifyUpdate();
+		}
+		return addedNodes;
+	}
+
+	public static function deserialize(data:GraphData, listener:GraphListener = null, vibration:Bool = true):Graph {
+		var id = data.id;
+		var graph = new Graph(listener, id);
+		data.id = -1;
+		deserializeInto(graph, 0, 0, data, vibration);
+		data.id = id;
+		return graph;
 	}
 }

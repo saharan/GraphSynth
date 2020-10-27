@@ -38,8 +38,8 @@ abstract Touches(TouchesData) {
 				var rawTouch:js.html.Touch = touches[i];
 				var rawId:Int = rawTouch.identifier;
 				var touch:Touch = this.getByRawId(rawId, true);
-				var x:Float = (rawTouch.clientX - elem.clientX()) * canvas.scaleX(input.scalingMode, pot.pixelScalingRatio);
-				var y:Float = (rawTouch.clientY - elem.clientY()) * canvas.scaleY(input.scalingMode, pot.pixelScalingRatio);
+				var x:Float = (rawTouch.clientX - elem.clientX()) * canvas.scaleX(input.scalingMode, pot.pixelRatio);
+				var y:Float = (rawTouch.clientY - elem.clientY()) * canvas.scaleY(input.scalingMode, pot.pixelRatio);
 				touch.begin(x, y);
 			}
 		});
@@ -52,8 +52,8 @@ abstract Touches(TouchesData) {
 				var rawId:Int = rawTouch.identifier;
 				var touch:Touch = this.getByRawId(rawId);
 				if (touch != null) {
-					var x:Float = (rawTouch.clientX - elem.clientX()) * canvas.scaleX(input.scalingMode, pot.pixelScalingRatio);
-					var y:Float = (rawTouch.clientY - elem.clientY()) * canvas.scaleY(input.scalingMode, pot.pixelScalingRatio);
+					var x:Float = (rawTouch.clientX - elem.clientX()) * canvas.scaleX(input.scalingMode, pot.pixelRatio);
+					var y:Float = (rawTouch.clientY - elem.clientY()) * canvas.scaleY(input.scalingMode, pot.pixelRatio);
 					touch.move(x, y);
 				}
 			}
@@ -67,8 +67,8 @@ abstract Touches(TouchesData) {
 				var rawId:Int = rawTouch.identifier;
 				var touch:Touch = this.getByRawId(rawId);
 				if (touch != null) {
-					var x:Float = (rawTouch.clientX - elem.clientX()) * canvas.scaleX(input.scalingMode, pot.pixelScalingRatio);
-					var y:Float = (rawTouch.clientY - elem.clientY()) * canvas.scaleY(input.scalingMode, pot.pixelScalingRatio);
+					var x:Float = (rawTouch.clientX - elem.clientX()) * canvas.scaleX(input.scalingMode, pot.pixelRatio);
+					var y:Float = (rawTouch.clientY - elem.clientY()) * canvas.scaleY(input.scalingMode, pot.pixelRatio);
 					touch.end(x, y);
 				}
 			}

@@ -24,6 +24,8 @@ class Vertex {
 
 	public var id:Int = ++idCount;
 
+	public final selection:Selection;
+
 	@:allow(graph.Graph)
 	function new(x:Float, y:Float, type:VertexType, invM:Float) {
 		this.type = type;
@@ -35,6 +37,7 @@ class Vertex {
 		edges = [];
 		tmpValForDfs = 0;
 		tmpValForRendering = 0;
+		selection = new Selection();
 	}
 
 	public function vibrate(strong:Bool = false):Void {

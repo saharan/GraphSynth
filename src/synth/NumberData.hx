@@ -1,12 +1,14 @@
 package synth;
 
+using StringTools;
+
 class NumberData {
 	var valueInt:Int;
 
 	public var value(get, set):Float;
 
-	public function new(x:Float) {
-		value = x;
+	public function new(value:Float) {
+		this.value = value;
 	}
 
 	function get_value():Float {
@@ -20,5 +22,10 @@ class NumberData {
 			vi = v > 0 ? 1 : -1;
 		valueInt = vi;
 		return value;
+	}
+
+	public function toString():String {
+		var rawStr = "$" + Std.string(value);
+		return rawStr.replace("$0.", ".").replace("$-0.", "-.").replace("$", "");
 	}
 }

@@ -18,18 +18,18 @@ class InputTools {
 	}
 
 	@:extern
-	public static inline function scaleX(canvas:CanvasElement, mode:InputScalingMode, pixelScalingRatio:Int):Float {
+	public static inline function scaleX(canvas:CanvasElement, mode:InputScalingMode, pixelRatio:Float):Float {
 		return switch (mode) {
 			case Canvas: canvas.width / canvas.clientWidth;
-			case Screen: canvas.width / pixelScalingRatio / canvas.clientWidth;
+			case Screen: canvas.width / pixelRatio / canvas.clientWidth;
 		};
 	}
 
 	@:extern
-	public static inline function scaleY(canvas:CanvasElement, mode:InputScalingMode, pixelScalingRatio:Int):Float {
+	public static inline function scaleY(canvas:CanvasElement, mode:InputScalingMode, pixelRatio:Float):Float {
 		return switch (mode) {
 			case Canvas: canvas.height / canvas.clientHeight;
-			case Screen: canvas.height / pixelScalingRatio / canvas.clientHeight;
+			case Screen: canvas.height / pixelRatio / canvas.clientHeight;
 		};
 	}
 }

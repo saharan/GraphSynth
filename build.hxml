@@ -1,4 +1,7 @@
 -cp src
 -D analyzer-optimize
+-D js-es=6
 -main app.Main
 --js docs/main.js
+# -debug
+# -D source-map-content

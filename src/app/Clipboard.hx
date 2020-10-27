@@ -1,25 +1,19 @@
 package app;
 
+import graph.serial.NodeFilter;
 import graph.Graph;
-import graph.Node;
-import graph.serial.NodeData;
+import graph.serial.GraphData;
 
 class Clipboard {
-	var nodeData:NodeData;
+	public var data(default, null):GraphData;
 
 	public function new() {
-		nodeData = null;
+		data = null;
 	}
 
-	public function copyNode(node:Node):Void {
-		nodeData = node.serialize(true);
-	}
-
-	public function hasData():Bool {
-		return nodeData != null;
-	}
-
-	public function pasteNode(graph:Graph, atX:Float, atY:Float):Void {
-		graph.createNodeByDataAt(atX, atY, nodeData);
+	public function copy(data:GraphData):Void {
+		var g = Graph.deserialize(data);
+		g.moveCenterToZero();
+		this.data = g.serialize(NodeFilter.ALL, false);
 	}
 }

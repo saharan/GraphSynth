@@ -1,5 +1,8 @@
 package render;
 
+import graph.SocketPhys;
+import graph.Selection;
+import graph.Vertex;
 import graph.NodePhys;
 import app.Menu;
 import graph.Graph;
@@ -30,7 +33,7 @@ class Renderer {
 
 	public function new(canvas:CanvasElement) {
 		this.canvas = canvas;
-		view = new View();
+		view = new View(null); // this can no longer be used
 		c2d = canvas.getContext2d();
 		canvasCenterHeightRatio = 0.4;
 		waveData = [];
@@ -125,9 +128,8 @@ class Renderer {
 					}
 				}
 				var dx = x + w * 0.5 - touchCanvasX;
-				return (dx < 0 ? -dx : dx) < keyWidth * 0.5 * blackKeyWidthRatio * blackKeyHitWidthScale
-					&& touchCanvasY > y + stroke
-					&& touchCanvasY < y + h - stroke;
+				return (dx < 0 ? -dx : dx) < keyWidth * 0.5 * blackKeyWidthRatio * blackKeyHitWidthScale && touchCanvasY > y +
+					stroke && touchCanvasY < y + h - stroke;
 			}
 
 			fill(0, 0, 0);
@@ -168,8 +170,7 @@ class Renderer {
 				if (blackKeyExists[i % blackKeyExists.length]) {
 					var blackCenter = stroke + keyWidth * (i + 1);
 					blackKey(blackCenter - keyWidth * blackKeyWidthRatio * 0.5, 0, keyWidth * blackKeyWidthRatio,
-						height * blackKeyHeightRatio, true, touching
-						&& i == blackIndex);
+						height * blackKeyHeightRatio, true, touching && i == blackIndex);
 				}
 			}
 			// index check
@@ -246,29 +247,29 @@ class Renderer {
 				y += 6;
 				continue;
 			}
-			var minX = -125.0;
-			var width = 250 / row.length;
+			var minX = -100.0;
+			var width = 200 / row.length;
 			var colX = minX;
 			for (item in row) {
 				if (item != null) {
 					fill(0, 0, 0);
-					if (mx > colX && mx < colX + width && my > y - 10 && my < y + 10) {
+					if (mx > colX && mx < colX + width && my > y - 8 && my < y + 8) {
 						fill(0.6, 0, 0);
 						stroke(0.6, 0, 0);
 						result = idx;
 						c2d.lineWidth = 1;
 						c2d.beginPath();
-						c2d.moveTo(colX, y + 10);
-						c2d.lineTo(colX + width, y + 10);
+						c2d.moveTo(colX, y + 8);
+						c2d.lineTo(colX + width, y + 8);
 						c2d.stroke();
 					}
-					circle(colX + 10, y, 3, FILL);
+					circle(colX + 8, y, 3, FILL);
 					text(item, colX + 20, y, 1.2);
 				}
 				colX += width;
 				idx++;
 			}
-			y += 20;
+			y += 16;
 		}
 		return result;
 	}
@@ -293,13 +294,71 @@ class Renderer {
 		s.phys.labelText = name;
 	}
 
+	public function renderShadowNode(n:Node, x:Float, y:Float):Void {
+		customRender(() -> {
+			this.drawNode(n, x, y, true);
+		});
+	}
+
+	public function renderShadowSlashing(x1:Float, y1:Float, x2:Float, y2:Float):Void {
+		c2d.lineWidth = 1;
+		customRender(() -> {
+			stroke(1, 0, 0);
+			c2d.beginPath();
+			c2d.moveTo(x1, y1);
+			c2d.lineTo(x2, y2);
+			c2d.stroke();
+		});
+	}
+
+	public function renderShadowConnection(src:Vertex, dst:Vertex):Void {
+		var x1 = src.point.x;
+		var y1 = src.point.y;
+		var r1 = switch src.type {
+			case Node(n):
+				n.getRadius();
+			case Socket(_):
+				0;
+			case Normal:
+				0;
+		};
+		var x2 = dst.point.x;
+		var y2 = dst.point.y;
+		var r2 = switch dst.type {
+			case Node(n):
+				n.getRadius();
+			case Socket(_):
+				0;
+			case Normal:
+				0;
+		};
+		var dx = x2 - x1;
+		var dy = y2 - y1;
+		var l = Math.sqrt(dx * dx + dy * dy);
+		var invL = l == 0 ? 0 : 1 / l;
+		var nx = dx * invL;
+		var ny = dy * invL;
+		x1 += nx * r1;
+		y1 += ny * r1;
+		x2 -= nx * r2;
+		y2 -= ny * r2;
+		c2d.lineWidth = 1;
+		customRender(() -> {
+			stroke(0, 0, 0, 0.5);
+			c2d.beginPath();
+			c2d.moveTo(x1, y1);
+			c2d.lineTo(x2, y2);
+			c2d.stroke();
+		});
+	}
+
 	function drawGraph(graph:Graph):Void {
 		waveData.resize(0);
 		graph.listener.onWaveDataRequest(waveData);
 
 		drawCables(graph);
 		for (n in graph.nodes) {
-			drawNode(n);
+			drawNode(n, n.phys.vertex.point.x, n.phys.vertex.point.y, false);
 		}
 		for (n in graph.nodes) {
 			for (s in n.sockets) {
@@ -386,6 +445,19 @@ class Renderer {
 		}
 		c2d.stroke();
 
+		for (v in graph.vertices) {
+			if (v.type != Normal)
+				continue;
+			if (v.selection.selected) {
+				var x = v.point.x;
+				var y = v.point.y;
+				var r = SocketPhys.RADIUS_SMALL;
+				fill(0, 0, 0);
+				circle(x, y, r, FILL);
+				drawSelection(x, y, r, v.selection);
+			}
+		}
+
 		var drawVertices = false;
 		if (drawVertices) {
 			fill(1, 0, 0);
@@ -440,30 +512,35 @@ class Renderer {
 		c2d.stroke();
 	}
 
-	function drawNode(node:Node):Void {
+	function drawSelection(x:Float, y:Float, r:Float, sel:Selection):Void {
+		sel.count++;
+		var t = sel.count % 40 / 40;
+		var selR = 10;
+		var strokeR = (1 - (1 - t) * (1 - t)) * 0.5 * selR;
+		var strokeA = 1 - t;
+		c2d.lineWidth = strokeR * 2;
+		stroke(0, 0, 0, strokeA);
+		circle(x, y, r + strokeR, STROKE);
+		c2d.lineWidth = 1;
+	}
+
+	function drawNode(node:Node, x:Float, y:Float, shadow:Bool):Void {
 		var isDestination = node.setting.role.match(Destination);
 		c2d.lineWidth = 1;
 
-		var np = node.phys;
-		var x = np.vertex.point.x;
-		var y = np.vertex.point.y;
+		var r = node.getRadius();
+		var alpha = shadow ? 0.5 : 1;
 
-		if (isDestination)
-			drawOutputWave(x, y, np.radius);
+		if (isDestination && !shadow)
+			drawOutputWave(x, y, r);
 
-		stroke(0, 0, 0);
-		fill(0, 0, 0);
-		circle(x, y, np.radius, STROKE);
+		stroke(0, 0, 0, alpha);
+		fill(0, 0, 0, alpha);
 
-		if (node.selected) {
-			node.selectingCount++;
-			var t = node.selectingCount % 40 / 40;
-			var strokeR = (1 - (1 - t) * (1 - t)) * 0.5;
-			var strokeA = 1 - t;
-			c2d.lineWidth = 1 + (1 - strokeA) * 5 * (node.phys.radius / NodePhys.DEFAULT_RADIUS);
-			stroke(0, 0, 0, strokeA);
-			circle(x, y, np.radius * (1 + strokeR), Renderer.STROKE);
-			c2d.lineWidth = 1;
+		circle(x, y, r, STROKE);
+
+		if (node.selection.selected && !shadow) {
+			drawSelection(x, y, r, node.selection);
 		}
 
 		switch (node.type) {
@@ -471,17 +548,17 @@ class Renderer {
 				var innerCircleSize = 0.8;
 				switch (type) {
 					case I:
-						var radDiff = np.radius * (1 - innerCircleSize);
+						var radDiff = r * (1 - innerCircleSize);
 						c2d.lineWidth = radDiff;
-						circle(x, y, np.radius * (1 + innerCircleSize) * 0.5, STROKE);
+						circle(x, y, r * (1 + innerCircleSize) * 0.5, STROKE);
 						c2d.lineWidth = 1;
 					case O:
-						circle(x, y, np.radius * innerCircleSize, STROKE);
+						circle(x, y, r * innerCircleSize, STROKE);
 				}
 			case _:
 		}
 
-		var textY = isDestination ? y - np.radius * 0.75 : y;
+		var textY = isDestination ? y - r * 0.75 : y;
 		c2d.textAlign = "center";
 		switch (node.setting.role) {
 			case Number(num):
@@ -495,25 +572,36 @@ class Renderer {
 		var sp = socket.phys;
 		sp.computeDrawingPos();
 
+		var r = sp.radius;
+		var x = sp.xForDrawing;
+		var y = sp.yForDrawing;
+
 		stroke(0, 0, 0);
-		circle(sp.xForDrawing, sp.yForDrawing, sp.radius, switch (socket.type.io()) {
+		circle(x, y, r, switch (socket.type.io()) {
 			case I:
 				FILL | STROKE;
 			case O:
 				STROKE;
 		});
 
+		if (socket.selection.selected) {
+			drawSelection(x, y, r, socket.selection);
+		}
+
 		var name = switch (socket.type) {
-			case Param(_, name): name;
-			case Module(_, boundary): boundary.setting.name;
-			case Normal(_): "";
+			case Param(_, name):
+				name;
+			case Module(_, boundary):
+				boundary.setting.name;
+			case Normal(_):
+				"";
 		}
 		if (name != "") {
 			if (sp.labels == null || sp.labelText != name)
 				createLabelForSocket(socket, name);
 			var l1 = sp.labels[0];
 			var l2 = sp.labels[1];
-			var scale = 0.25;
+			var scale = socket.selection.selected ? 0.35 : 0.25;
 
 			var angle:Float = Math.atan2(sp.normalY, sp.normalX);
 			var np = node.phys;
@@ -523,14 +611,14 @@ class Renderer {
 			stroke(1, 1, 1);
 			c2d.translate(x, y);
 			c2d.rotate(angle);
-			c2d.translate(np.radius + sp.radius * 2 - 1, 0);
+			c2d.translate(np.radius + r * 2 - 1, 0);
 			c2d.scale(scale, scale);
 			if (sp.normalX < 0) {
 				rotated(PI, () -> {
-					c2d.drawImage(l2, -l1.width, -l1.height * 0.5);
+					c2d.drawImage(l2, -l1.width, -l1.height * 0.4);
 				});
 			} else {
-				c2d.drawImage(l1, 0, -l1.height * 0.5);
+				c2d.drawImage(l1, 0, -l1.height * 0.4);
 			}
 			c2d.restore();
 		}

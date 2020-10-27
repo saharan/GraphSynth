@@ -9,13 +9,17 @@ class NodePhys {
 	public var vertex:Vertex;
 	public var radius:Float;
 
+	public var drawingRadiusOffset(default, set):Float;
+
+	var scale:Float;
+
 	public function new(g:Graph, node:Node, x:Float, y:Float) {
 		this.node = node;
 		vertex = g.createVertex(x, y, Node(node), switch (node.type) {
 			case Small: SMALL_NODE_INV_MASS;
 			case _: NORMAL_NODE_INV_MASS;
 		});
-		radius = DEFAULT_RADIUS * switch (node.type) {
+		scale = switch (node.type) {
 			case Small: 0.5;
 			case _:
 				switch (node.setting.role) {
@@ -23,19 +27,29 @@ class NodePhys {
 					case _: 1.0;
 				}
 		};
+		drawingRadiusOffset = 0;
 	}
 
 	@:allow(graph.Node)
 	function toSmall():Void {
 		vertex.point.invM = SMALL_NODE_INV_MASS;
-		scale(0.5);
+		changeScale(0.5);
 	}
 
 	@:allow(graph.Node)
-	function scale(s:Float = 1.0):Void {
-		radius = DEFAULT_RADIUS * s;
-		for (s in node.sockets) {
-			s.phys.edge.spring.length = radius + s.phys.radius * 2;
+	function changeScale(s:Float = 1.0):Void {
+		scale = s;
+		radius = DEFAULT_RADIUS * s + drawingRadiusOffset;
+		if (node.sockets != null) {
+			for (s in node.sockets) {
+				s.phys.edge.spring.length = radius + s.phys.radius * 2;
+			}
 		}
+	}
+
+	function set_drawingRadiusOffset(v:Float):Float {
+		drawingRadiusOffset = v;
+		changeScale(scale);
+		return v;
 	}
 }

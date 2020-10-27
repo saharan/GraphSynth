@@ -13,6 +13,8 @@ class Socket {
 
 	public var type:SocketType;
 
+	public var grayedOut:Bool;
+
 	public var connections:Array<SocketConnection> = [];
 	public var prevConnections:Array<SocketConnection> = [];
 
@@ -20,11 +22,15 @@ class Socket {
 
 	public final id:Int = ++idCount;
 
+	public final selection:Selection;
+
 	public function new(g:Graph, parent:Node, type:SocketType) {
 		this.g = g;
 		this.parent = parent;
 		this.type = type;
 		phys = new SocketPhys(g, parent.phys, this);
+		selection = new Selection();
+		grayedOut = false;
 	}
 
 	public static function serializeType(type:SocketType, boundaries:Array<Node>):SocketTypeData {

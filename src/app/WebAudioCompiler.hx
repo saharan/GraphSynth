@@ -1,5 +1,7 @@
 package app;
 
+import synth.OscillatorType;
+import js.Syntax;
 import js.lib.Float32Array;
 import js.html.audio.AnalyserNode;
 import graph.GraphListener;
@@ -16,16 +18,23 @@ import js.html.audio.OscillatorNode;
 import js.lib.WeakMap;
 
 using app.WebAudioCompiler.AudioNodeTools;
+using Lambda;
 
 class AudioNodeTools {
 	static var mapN:WeakMap<Map<AudioNode, Bool>> = new WeakMap();
 	static var mapP:WeakMap<Map<AudioParam, Bool>> = new WeakMap();
 
-	public static function connectSafe(src:AudioNode, ?targetNode:AudioNode, ?targetParam:AudioParam):Void {
+	static function eval(src:AudioNode):Void {
 		if (!mapN.has(src))
 			mapN.set(src, new Map());
 		if (!mapP.has(src))
 			mapP.set(src, new Map());
+	}
+
+	public static function connectSafe(src:AudioNode, ?targetNode:AudioNode, ?targetParam:AudioParam):Void {
+		if (targetNode == null && targetParam == null)
+			throw "spacify either targetNode or targetParam";
+		eval(src);
 		if (targetNode != null) {
 			mapN.get(src).set(targetNode, true);
 			src.connect(targetNode);
@@ -37,10 +46,9 @@ class AudioNodeTools {
 	}
 
 	public static function disconnectSafe(src:AudioNode, ?targetNode:AudioNode, ?targetParam:AudioParam):Void {
-		if (!mapN.has(src))
-			mapN.set(src, new Map());
-		if (!mapP.has(src))
-			mapP.set(src, new Map());
+		if (targetNode == null && targetParam == null)
+			throw "spacify either targetNode or targetParam";
+		eval(src);
 		if (targetNode != null) {
 			mapN.get(src).remove(targetNode);
 			src.disconnect(targetNode);
@@ -49,17 +57,48 @@ class AudioNodeTools {
 			mapP.get(src).remove(targetParam);
 			src.disconnect(targetParam);
 		}
-		if (targetNode == null && targetParam == null) {
-			mapN.get(src).clear();
-			mapP.get(src).clear();
-			src.disconnect();
-		}
+		// connect to other nodes/parameters
 		for (n in mapN.get(src).keys()) {
 			src.connect(n);
 		}
 		for (p in mapP.get(src).keys()) {
 			src.connect(p);
 		}
+	}
+
+	public static function disconnectNodesSafe(src:AudioNode, predicate:AudioNode->Bool):Void {
+		eval(src);
+		var nodesToDisconnect = [for (n in mapN.get(src).keys()) n].filter(predicate);
+		for (n in nodesToDisconnect) {
+			src.disconnect(n);
+			mapN.get(src).remove(n);
+		}
+		for (n in mapN.get(src).keys()) {
+			if (predicate(n)) {
+				src.disconnect(n);
+			}
+		}
+	}
+
+	public static function disconnectParamsSafe(src:AudioNode, predicate:AudioParam->Bool):Void {
+		eval(src);
+		var paramsToDisconnect = [for (p in mapP.get(src).keys()) p].filter(predicate);
+		for (p in paramsToDisconnect) {
+			src.disconnect(p);
+			mapP.get(src).remove(p);
+		}
+		for (p in mapP.get(src).keys()) {
+			if (predicate(p)) {
+				src.disconnect(p);
+			}
+		}
+	}
+
+	public static function disconnectAllSafe(src:AudioNode):Void {
+		eval(src);
+		mapN.get(src).clear();
+		mapP.get(src).clear();
+		src.disconnect();
 	}
 }
 
@@ -97,15 +136,55 @@ private enum SocketTarget {
 private enum NodeTarget {
 	Node(n:AudioNode);
 	MultiNode(n:MultiNode);
+	OscillatorNode(n:CustomOscillatorNode);
+}
+
+// oscillator with gain
+private class CustomOscillatorNode {
+	public final frequency:AudioParam;
+	public final detune:AudioParam;
+	public final gain:AudioParam;
+	public final output:GainNode;
+
+	var ctx:AudioContext;
+	var oscillator:OscillatorNode;
+
+	public function new(ctx:AudioContext, type:OscillatorType) {
+		this.ctx = ctx;
+		oscillator = ctx.createOscillator();
+		frequency = oscillator.frequency;
+		detune = oscillator.detune;
+
+		output = ctx.createGain();
+		gain = output.gain;
+		gain.value = 1.0;
+
+		oscillator.connectSafe(output);
+		setType(type);
+		oscillator.start();
+	}
+
+	public function setType(type:OscillatorType):Void {
+		oscillator.type = switch type {
+			case Sine:
+				SINE;
+			case Sawtooth:
+				SAWTOOTH;
+			case Square:
+				SQUARE;
+			case Triangle:
+				TRIANGLE;
+		}
+	}
 }
 
 // pseudo-AudioNode for multiplication
 private class MultiNode {
-	public var inputs:Array<AudioNode>;
-	public var output:GainNode;
+	public final inputs:Array<AudioNode>;
+	public final output:GainNode;
 
 	var ctx:AudioContext;
-	var nodes:Array<GainNode>;
+	var nodes:Array<AudioNode>;
 
 	public var mul:Bool;
 
@@ -128,17 +207,21 @@ private class MultiNode {
 		updateInputs();
 	}
 
+	function isInternalNode(node:AudioNode):Bool {
+		return node == output || nodes.contains(node);
+	}
+
 	public function disconnectInput(input:AudioNode) {
 		inputs.remove(input);
-		input.disconnectSafe();
+		input.disconnectNodesSafe(isInternalNode);
 		updateInputs();
 	}
 
 	public function updateInputs():Void {
 		for (n in inputs)
-			n.disconnectSafe();
+			n.disconnectNodesSafe(isInternalNode);
 		for (n in nodes) {
-			n.disconnectSafe();
+			n.disconnectAllSafe();
 		}
 		nodes = [];
 		if (mul) {
@@ -191,10 +274,9 @@ class WebAudioCompiler implements GraphListener {
 	final waveDataBuffer:Float32Array = new Float32Array(1024);
 
 	public function new() {
-		ctx = untyped __js__("new (window.AudioContext || window.webkitAudioContext)()");
+		ctx = Syntax.code("new (window.AudioContext || window.webkitAudioContext)()");
 		ctx.suspend();
 
-		var compressor = ctx.createDynamicsCompressor();
 		var saturator = ctx.createScriptProcessor(1024);
 		saturator.addEventListener("audioprocess", function(e:AudioProcessingEvent):Void {
 			var inL = e.inputBuffer.getChannelData(0);
@@ -213,7 +295,6 @@ class WebAudioCompiler implements GraphListener {
 		masterGain.gain.value = 0.0;
 		var hiddenGain = ctx.createGain();
 		hiddenGain.gain.value = 0.8;
-		compressor.connectSafe(saturator);
 		saturator.connectSafe(masterGain);
 		masterGain.connectSafe(hiddenGain);
 		hiddenGain.connectSafe(ctx.destination);
@@ -236,12 +317,7 @@ class WebAudioCompiler implements GraphListener {
 	}
 
 	function playStartSound():Void {
-		var oscs = [
-			ctx.createOscillator(),
-			ctx.createOscillator(),
-			ctx.createOscillator(),
-			ctx.createOscillator()
-		];
+		var oscs = [ctx.createOscillator(), ctx.createOscillator(), ctx.createOscillator(), ctx.createOscillator()];
 		oscs[0].type = SQUARE;
 		oscs[1].type = SQUARE;
 		oscs[2].type = SAWTOOTH;
@@ -257,12 +333,15 @@ class WebAudioCompiler implements GraphListener {
 		}
 		var time = ctx.currentTime;
 		gain.gain.setValueAtTime(0, time);
-		gain.gain.linearRampToValueAtTime(0.5, time + 1.0);
-		gain.gain.linearRampToValueAtTime(0, time + 2.0);
-		var compl = ctx.createDynamicsCompressor();
-		gain.connect(compl);
-		compl.connect(ctx.destination);
-		compl.connect(analyzer);
+		gain.gain.linearRampToValueAtTime(1, time + 0.6);
+		gain.gain.linearRampToValueAtTime(0, time + 1.2);
+		var comp = ctx.createDynamicsCompressor();
+		gain.connect(comp);
+		var gain2 = ctx.createGain();
+		gain2.gain.value = 0.5;
+		comp.connect(gain2);
+		gain2.connect(ctx.destination);
+		gain2.connect(analyzer);
 	}
 
 	public function start() {
@@ -351,19 +430,14 @@ class WebAudioCompiler implements GraphListener {
 				MultiNode(new MultiNode(ctx, false));
 			case BinOp(type):
 				MultiNode(new MultiNode(ctx, switch (type) {
-					case Add: false;
-					case Mult: true;
+					case Add:
+						false;
+					case Mult:
+						true;
 				}));
 			case Oscillator(type):
-				var osc = ctx.createOscillator();
-				osc.start();
-				osc.type = switch (type) {
-					case Sine: SINE;
-					case Sawtooth: SAWTOOTH;
-					case Square: SQUARE;
-					case Triangle: TRIANGLE;
-				}
-				Node(osc);
+				var osc = new CustomOscillatorNode(ctx, type);
+				OscillatorNode(osc);
 			case Delay:
 				Node(ctx.createDelay(5));
 			case Envelope(_):
@@ -373,13 +447,20 @@ class WebAudioCompiler implements GraphListener {
 			case Filter(type):
 				var bq = ctx.createBiquadFilter();
 				bq.type = switch (type) {
-					case LowPass: LOWPASS;
-					case HighPass: HIGHPASS;
-					case BandPass: BANDPASS;
-					case BandStop: NOTCH;
-					case LowShelf: LOWSHELF;
-					case HighShelf: HIGHSHELF;
-					case Peak: PEAKING;
+					case LowPass:
+						LOWPASS;
+					case HighPass:
+						HIGHPASS;
+					case BandPass:
+						BANDPASS;
+					case BandStop:
+						NOTCH;
+					case LowShelf:
+						LOWSHELF;
+					case HighShelf:
+						HIGHSHELF;
+					case Peak:
+						PEAKING;
 				};
 				Node(bq);
 			case Compressor:
@@ -397,8 +478,12 @@ class WebAudioCompiler implements GraphListener {
 
 	function getNodeOf(id:Int):Any {
 		return switch (nodeMap[id].target) {
-			case Node(n): return n;
-			case MultiNode(n): return n;
+			case Node(n):
+				return n;
+			case MultiNode(n):
+				return n;
+			case OscillatorNode(n):
+				return n;
 		};
 	}
 
@@ -411,19 +496,25 @@ class WebAudioCompiler implements GraphListener {
 			case Normal(O):
 				var terminal = ctx.createGain();
 				switch (node.target) {
-					case Node(n): n.connectSafe(terminal);
-					case MultiNode(n): n.output.connectSafe(terminal);
+					case Node(n):
+						n.connectSafe(terminal);
+					case MultiNode(n):
+						n.output.connectSafe(terminal);
+					case OscillatorNode(n):
+						n.output.connectSafe(terminal);
 				}
 				Node(Node(terminal));
 			case Param(I, name):
 				Param(switch (node.setting.role) {
 					case Oscillator(_):
-						var osc = cast(getNodeOf(nodeId), OscillatorNode);
+						var osc = cast(getNodeOf(nodeId), CustomOscillatorNode);
 						switch (name) {
 							case "freq":
 								osc.frequency;
 							case "detune":
 								osc.detune;
+							case "gain":
+								osc.gain;
 							case _:
 								throw "!?";
 						}
@@ -463,16 +554,22 @@ class WebAudioCompiler implements GraphListener {
 		var s = socketMap[id];
 		if (s.type.match(Normal(O))) {
 			var terminal = switch (s.target) {
-				case Node(n): switch (n) {
-						case Node(n): n;
-						case _: throw "!?";
+				case Node(n):
+					switch (n) {
+						case Node(n):
+							n;
+						case _:
+							throw "!?";
 					}
-				case _: throw "!?";
+				case _:
+					throw "!?";
 			}
 			switch (nodeMap[s.nodeId].target) {
 				case Node(n):
 					n.disconnectSafe(terminal);
 				case MultiNode(n):
+					n.output.connectSafe(terminal);
+				case OscillatorNode(n):
 					n.output.connectSafe(terminal);
 			}
 		}
@@ -494,16 +591,20 @@ class WebAudioCompiler implements GraphListener {
 										n.connectSafe(n2);
 									case MultiNode(n2):
 										n2.connectInput(n);
+									case OscillatorNode(_):
+										"cannot connect to an OscillatorNode";
 								}
 							case Param(p2):
 								n.connectSafe(p2);
 								p2.value = 0;
 						}
 					case MultiNode(_):
-						throw "cannot connect directly from multinode";
+						throw "starting socket target must not be a MultiNode";
+					case OscillatorNode(_):
+						throw "starting socket target must not be an OscillatorNode";
 				}
 			case Param(_):
-				throw "cannot connect from param";
+				throw "starting socket target must not be a param";
 		}
 	}
 
@@ -522,16 +623,20 @@ class WebAudioCompiler implements GraphListener {
 										n.disconnectSafe(n2);
 									case MultiNode(n2):
 										n2.disconnectInput(n);
+									case OscillatorNode(_):
+										"cannot disconnect from an OscillatorNode";
 								}
 							case Param(p2):
 								n.disconnectSafe(p2);
 								p2.value = p2.defaultValue;
 						}
 					case MultiNode(_):
-						throw "cannot disconnect directly from multinode";
+						throw "starting socket target must not be a MultiNode";
+					case OscillatorNode(_):
+						throw "starting socket target must not be an OscillatorNode";
 				}
 			case Param(_):
-				throw "cannot disconnect from param";
+				throw "starting socket target must not be a param";
 		}
 	}
 
@@ -542,20 +647,35 @@ class WebAudioCompiler implements GraphListener {
 				var gain = cast(getNodeOf(id), GainNode);
 				gain.gain.value = num.value;
 			case Oscillator(type):
-				var osc = cast(getNodeOf(id), OscillatorNode);
-				osc.type = switch (type) {
-					case Sine: SINE;
-					case Sawtooth: SAWTOOTH;
-					case Square: SQUARE;
-					case Triangle: TRIANGLE;
-				}
+				var osc = cast(getNodeOf(id), CustomOscillatorNode);
+				osc.setType(type);
 			case BinOp(type):
 				var multi = cast(getNodeOf(id), MultiNode);
 				multi.mul = switch (type) {
-					case Add: false;
-					case Mult: true;
+					case Add:
+						false;
+					case Mult:
+						true;
 				};
 				multi.updateInputs();
+			case Filter(type):
+				var bq = cast(getNodeOf(id), BiquadFilterNode);
+				bq.type = switch (type) {
+					case LowPass:
+						LOWPASS;
+					case HighPass:
+						HIGHPASS;
+					case BandPass:
+						BANDPASS;
+					case BandStop:
+						NOTCH;
+					case LowShelf:
+						LOWSHELF;
+					case HighShelf:
+						HIGHSHELF;
+					case Peak:
+						PEAKING;
+				};
 			case _:
 		}
 	}

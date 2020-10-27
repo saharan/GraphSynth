@@ -1,0 +1,40 @@
+package pot.input;
+
+enum abstract KeyValue(String) to String {
+	var Alt = "Alt";
+	var CapsLock = "CapsLock";
+	var Control = "Control";
+	var Meta = "Meta";
+	var NumLock = "NumLock";
+	var Shift = "Shift";
+	var Enter = "Enter";
+	var Tab = "Tab";
+	var Space = " ";
+	var ArrowDown = "ArrowDown";
+	var ArrowLeft = "ArrowLeft";
+	var ArrowRight = "ArrowRight";
+	var ArrowUp = "ArrowUp";
+	var End = "End";
+	var Home = "Home";
+	var PageDown = "PageDown";
+	var PageUp = "PageUp";
+	var Backspace = "Backspace";
+	var Delete = "Delete";
+	var Insert = "Insert";
+	var ContextMenu = "ContextMenu";
+	var Escape = "Escape";
+	var F1 = "F1";
+	var F2 = "F2";
+	var F3 = "F3";
+	var F4 = "F4";
+	var F5 = "F5";
+	var F6 = "F6";
+	var F7 = "F7";
+	var F8 = "F8";
+	var F9 = "F9";
+	var F10 = "F10";
+	var F11 = "F11";
+	var F12 = "F12";
+	public static final DIGITS:Array<String> = cast ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+	public static final FUNCTIONS:Array<String> = [F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12];
+}
